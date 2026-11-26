@@ -2,13 +2,13 @@
   "format": 2,
   "id": "rac2-seeker-fix",
   "name": "Seeker Fix",
-  "version": "0.1.0",
+  "version": "0.2.1",
   "author": "Slim Cognito",
   "description": "Seeker Gun and HK-22 missiles no longer back away from their target while they lock on, so they stop blowing up on walls and floors. The lock-on delay is kept.",
   "license": "MIT",
   "type": "native",
   "api": "1.0",
-  "games": { "rac2": ["ntsc"] },
+  "games": { "rac2": ["ntsc", "ntsc2", "pal"] },
   "plugin": { "windows-x86_64": "lib/windows-x86_64/seeker_fix.dll" },
   "multiplayer": "gameplay"
 }

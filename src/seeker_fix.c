@@ -1,4 +1,5 @@
-/* Seeker Fix: a native OpenRAC mod for Ratchet & Clank: Going Commando (NTSC-U v1.01).
+/* Seeker Fix: a native OpenRAC mod for Ratchet & Clank: Going Commando (NTSC-U v1.01, NTSC-U v2.00
+ * Greatest Hits and PAL).
  *
  * The Seeker Gun's and HK-22's missiles (moby classes 1497 and 3329, both run by
  * UpdateHomingProjectile, func_L00_003AA708 in rac2-decomp) lock on in two steps before they
@@ -10,6 +11,14 @@
  * blow up. After each tick the mod puts that push back, toward the target, so the missile holds
  * its place during the lock-on (its drift and its turn toward the target are kept, and so is
  * the delay) and then dives as before.
+ *
+ * The discs differ only in these numbers (the moby and pvar layouts are the same on all three):
+ *   disc            hero moby   push a tick   state 1 / state 2 ticks
+ *   "ntsc"  v1.01   0x18C0B0    0.0833        20 / 10
+ *   "ntsc2" v2.00   0x18C0B0    0.0833        20 / 10   (the same function as v1.01's)
+ *   "pal"           0x18C130    0.1           17 / 8    (50 Hz: func_PAL_L00_003ADEA8, the same
+ *                                                         steps with the timings scaled)
+ * In state 2 the push is scaled by (timer - n/2) / (n/2), n the state's ticks.
  */
 #include <stddef.h>
 #include <stdint.h>
@@ -19,17 +28,20 @@
 #endif
 #include "openrac/openrac_mod.h"
 
-OPENRAC_MOD_DEFINE("rac2-seeker-fix", "0.1.0")
+OPENRAC_MOD_DEFINE("rac2-seeker-fix", "0.2.1")
 
-#define A_HERO_MOBY 0x18C0B0u /* u32: the player's moby, in the level's moby array */
 #define CLASS_SEEKER 1497
 #define CLASS_HK22 3329
-#define PUSH 0.083333336f
 #define SCAN_SLOTS 6144 /* each side of the player's moby, 0x100 bytes a moby */
 #define TRACKED 64
 
 static const openrac_api* g_api;
 static openrac_mod* g_mod;
+
+/* The disc's numbers (the table above), set by openrac_mod_load. */
+static uint32_t g_hero_moby; /* u32: the player's moby, in the level's moby array */
+static float g_push;         /* how far the game pushes the missile back each tick */
+static int g_state2_ticks;   /* state 2's length */
 
 static struct {
     uint32_t moby;
@@ -91,13 +103,14 @@ static void fix_missile(uint32_t m) {
     if (!in_ram(target) || rd8(target + 0x20) >= 0xFD) return;
 
     if (state == 1) {
-        amount = PUSH;
-    } else if (timer == 10) {
-        amount = PUSH; /* the last state-1 tick, which moved it to state 2 */
+        amount = g_push;
+    } else if (timer == g_state2_ticks) {
+        amount = g_push; /* the last state-1 tick, which moved it to state 2 */
     } else {
         /* the tick ran with the timer one higher than it is now */
-        float r = ((float)(timer + 1) - 5.0f) / 5.0f;
-        amount = r > 0.0f ? r * PUSH : 0.0f;
+        float half = (float)g_state2_ticks * 0.5f;
+        float r = ((float)(timer + 1) - half) / half;
+        amount = r > 0.0f ? r * g_push : 0.0f;
     }
     if (amount <= 0.0f) return;
 
@@ -113,7 +126,7 @@ static void fix_missile(uint32_t m) {
 }
 
 static void on_frame(void* user) {
-    uint32_t hero = rd32(A_HERO_MOBY), p;
+    uint32_t hero = rd32(g_hero_moby), p;
     int i;
     (void)user;
     if (!in_ram(hero)) return;
@@ -127,12 +140,28 @@ static void on_frame(void* user) {
     }
 }
 
+static int str_is(const char* a, const char* b) {
+    while (*a && *a == *b) a++, b++;
+    return *a == *b;
+}
+
 OPENRAC_MOD_EXPORT int openrac_mod_load(const openrac_api* api, openrac_mod* mod) {
     g_api = api;
     g_mod = mod;
-    if (!api->game || api->game[0] != 'r' || api->game[3] != '2' ||
-        !api->version || api->version[0] != 'n' || api->version[4] != 0) {
-        api->fail(mod, "only for Going Commando NTSC-U v1.01 (\"ntsc\")");
+    if (!api->game || !str_is(api->game, "rac2") || !api->version) {
+        api->fail(mod, "only for Going Commando");
+        return 1;
+    }
+    if (str_is(api->version, "ntsc") || str_is(api->version, "ntsc2")) {
+        g_hero_moby = 0x18C0B0u;
+        g_push = 0.083333336f;
+        g_state2_ticks = 10;
+    } else if (str_is(api->version, "pal")) {
+        g_hero_moby = 0x18C130u;
+        g_push = 0.1f;
+        g_state2_ticks = 8;
+    } else {
+        api->fail(mod, "only for Going Commando NTSC-U v1.01, NTSC-U v2.00 or PAL");
         return 1;
     }
     api->on_frame(mod, on_frame, 0);
